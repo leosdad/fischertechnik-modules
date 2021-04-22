@@ -6,4 +6,4 @@ This module uses the RCWL-1601 sensor, a smaller alternative to the ubiquitous H
 
 ### I²C motor driver module
 
-This is a module to control two encoder motors and two servos via I2C. I plan to use an Arduino Pro Mini clone and a generic DRV8833 board (I'm using a L293D for now).
+This is a module to control two encoder motors and two servos via I2C. It uses an Arduino Pro Mini clone and a DRV8833 board.
