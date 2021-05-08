@@ -24,56 +24,40 @@
 
 #define TWOCC(ch0, ch1) ((word)(byte)(ch0) | ((word)(byte)(ch1) << 8))
 
-#define MOTOR_CCW	{ analogWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, speed[currentMotor]); analogWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, 0); }
-#define MOTOR_CW	{ analogWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, 0); analogWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, speed[currentMotor]); }
-#define MOTOR_IDLE	{ digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, LOW); digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, LOW); }
-#define MOTOR_BRAKE	{ digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, HIGH); digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, HIGH); }
-
 // Arduino pins
 
-// https://www.arduino.cc/reference/en/language/functions/analog-io/analogwrite/
-// "The PWM outputs generated on pins 5 and 6 will have higher-than-expected duty cycles"
+#define motorAPin1	10
+#define motorAPin2	11
+#define motorBPin1	5
+#define motorBPin2	6
 
-//					0		// D0 TX
-//					1		// D1 RX
-#define encoderA1	2		// D2 / INT0
-#define motorBPin1	3		// D3 PWM / INT1
-#define encoderA2	4		// D4
-#define motorAPin1	5		// D5 PWM
-#define motorAPin2	6		// D6 PWM
-#define encoderB1	7		// D7
-#define encoderB2	8		// D8
-#define motorBPin2	9		// D9 PWM
-//					10		// D10 PWM / SPI / SS
-//					11		// D11 PWM / SPI / MOSI
-//					12		// D12 / SPI / MISO
-#define eventPin	13		// D13 / LED
-#define limitA1Pin	14		// A0
-#define limitA2Pin	15		// A1
-#define limitB1Pin	16		// A2
-#define limitB2Pin	17		// A3
-//					18		// A4 / I2C SDA
-//					19		// A5 / I2C SCL
-//					20		// A6
-//					21		// A7
+#define encoderA	2
+#define encoderB	3
+
+#define limitA1Pin	14
+#define limitA2Pin	15
+#define limitB1Pin	16
+#define limitB2Pin	17
 
 // I2C commands
 
 #define cmdBackwards	TWOCC('B', 'w')
 #define cmdBrake		TWOCC('B', 'r')
+#define cmdCoast		TWOCC('C', 'o')
 #define cmdForward		TWOCC('F', 'w')
 #define cmdGoal			TWOCC('G', 'o')
 #define cmdHome			TWOCC('H', 'o')
 #define cmdHello		TWOCC('H', 'i')
-#define cmdIdle			TWOCC('I', 'd')
 #define cmdMode			TWOCC('M', 'd')
 #define cmdSetMotor		TWOCC('M', 't')
 #define cmdSpeed		TWOCC('S', 'p')
 
+// -----------------------------------------------------------------------------
+
 // Motor states
 
 enum {
-	IDLE = 0,
+	COAST = 0,
 	FORWARD,
 	BACKWARDS,
 	HOME,
@@ -90,18 +74,21 @@ enum {
 };
 
 enum {
-	PULSES = 0,
+	DIRECT = 0,
+	PULSES,
 	ENDLIMITSWITCH,
 };
+
+// -----------------------------------------------------------------------------
 
 // Variables
 
 bool direction[2] = {false, false};
 byte currentMotor = MOTOR_A;
 byte encoderLast[2] = {-1, -1};
-byte state[2] = {IDLE, IDLE};
+byte state[2] = {COAST, COAST};
 byte speed[2] = {255, 255};
-byte mode[2] = {PULSES, PULSES};
+byte mode[2] = {DIRECT, DIRECT};
 uint pulses[2] = {0, 0};
 uint targetPulses[2] = {0, 0};
 
@@ -121,11 +108,8 @@ void setup()
 	pinMode(limitB1Pin, INPUT_PULLUP);
 	pinMode(limitB2Pin, INPUT_PULLUP);
 
-	pinMode(eventPin, OUTPUT);
-	digitalWrite(eventPin, LOW);
-
-	// pinMode(encoderA1, INPUT_PULLUP);	// Does nothing: probably 20kΩ is not enough
-	// pinMode(encoder.... (not tested)
+	// pinMode(encoderA, INPUT_PULLUP);	// Does nothing: probably 20kΩ is not enough
+	// pinMode(encoderB, INPUT_PULLUP);
 
 	initMotors();
 	initEncoders();
@@ -141,41 +125,54 @@ void loop()
 		case HOME:
 
 			if(!digitalRead(currentMotor == MOTOR_A ? limitA1Pin : limitB1Pin)) {
-				MOTOR_BRAKE;
+				MotorBrake();
 				resetState();
 			} else {
 				pulses[currentMotor] = 0;
 				state[currentMotor] = GOHOME;
-				MOTOR_CW;
+				MotorCW();
 				Serial.println("State = GOHOME");
 			}
 			break;
 
 		case FORWARD:
 
-			pulses[currentMotor] = 0;
-			state[currentMotor] = CCW;
-			MOTOR_CCW;
-			Serial.println("State = CCW");
+			if(mode[currentMotor] != DIRECT) {
+				pulses[currentMotor] = 0;
+				state[currentMotor] = CCW;
+				Serial.println("State = CCW");
+			}
+			MotorCCW();
 			break;
 
 		case BACKWARDS:
 
-			pulses[currentMotor] = 0;
-			state[currentMotor] = CW;
-			MOTOR_CW;
-			Serial.println("State = CW");
+			if(mode[currentMotor] != DIRECT) {
+				pulses[currentMotor] = 0;
+				state[currentMotor] = CW;
+				Serial.println("State = CW");
+			}
+			MotorCW();
+			break;
+
+		case BRAKE:
+
+			MotorBrake();
+			break;
+
+		case COAST:
+
+			MotorCoast();
 			break;
 
 		case GOHOME:
 
 			if(!digitalRead(currentMotor == MOTOR_A ? limitA1Pin : limitB1Pin)) {
 				// Stop motor
-				MOTOR_BRAKE;
-				sendSignal();
+				MotorBrake();
 				pulses[currentMotor] = 0;
-				state[currentMotor] = IDLE;
-				Serial.println("State = IDLE");
+				state[currentMotor] = COAST;
+				Serial.println("State = COAST");
 			}
 			break;
 
@@ -185,11 +182,10 @@ void loop()
 			if(mode[currentMotor] == PULSES) {
 				if(pulses[currentMotor] >= targetPulses[currentMotor]) {
 					// Stop motor
-					MOTOR_BRAKE;
-					sendSignal();
+					MotorBrake();
 					pulses[currentMotor] = 0;
-					state[currentMotor] = IDLE;
-					Serial.println("State = IDLE");
+					state[currentMotor] = COAST;
+					Serial.println("State = COAST");
 				// } else {
 					// Serial.print(pulses[currentMotor]);
 					// Serial.print(" / ");
@@ -197,10 +193,9 @@ void loop()
 				}
 			} else {
 				if(!digitalRead(currentMotor == MOTOR_A ? limitA2Pin : limitB2Pin)) {
-					MOTOR_BRAKE;
-					sendSignal();
-					state[currentMotor] = IDLE;
-					Serial.println("State = IDLE");
+					MotorBrake();
+					state[currentMotor] = COAST;
+					Serial.println("State = COAST");
 				}
 			}
 			break;
@@ -240,7 +235,7 @@ void receiveEvent(int nBytes)
 			break;
 
 		case cmdMode:
-			mode[currentMotor] = cmd[2] & 0x01;
+			mode[currentMotor] = cmd[2] & 0x0F;
 			Serial.print("Motor mode is ");
 			Serial.println(mode[currentMotor]);
 			break;
@@ -255,6 +250,18 @@ void receiveEvent(int nBytes)
 			Serial.println("Moving backwards...");
 			state[currentMotor] = BACKWARDS;
 			Serial.println("State = BACKWARDS");
+			break;
+
+		case cmdBrake:
+			Serial.println("Braking...");
+			state[currentMotor] = BRAKE;
+			Serial.println("State = BRAKE");
+			break;
+
+		case cmdCoast:
+			Serial.println("Coasting...");
+			state[currentMotor] = COAST;
+			Serial.println("State = COAST");
 			break;
 
 		case cmdHome:
@@ -291,29 +298,23 @@ void requestEvent()
 {
 	byte data[4];
 
-	data[0] = state[currentMotor];
-	data[1] = currentMotor;
-	data[2] = pulses[currentMotor] & 0xff;
-	data[3] = (pulses[currentMotor] & 0xff00) >> 8;
+	data[0] = pulses[0] & 0xff;
+	data[1] = (pulses[0] & 0xff00) >> 8;
+	data[2] = pulses[1] & 0xff;
+	data[3] = (pulses[1] & 0xff00) >> 8;
+
 	Wire.write(data, 4);
 
-	Serial.println("--------- Requested: ");
-	Serial.println(state[currentMotor]);
-	Serial.println(pulses[currentMotor]);
+	Serial.println("--------- Requested:");
+	for(int motor = 0; motor < 2; motor++) {
+		Serial.print("  Motor ");
+		Serial.print(motor);
+		Serial.print(" / state ");
+		Serial.print(state[motor]);
+		Serial.print(" / pulses ");
+		Serial.println(pulses[motor]);
+	}
 	Serial.println("---------");
-}
-
-void sendSignal()
-{
-	// Signals to the micro:bit that an operation was completed
-
-	digitalWrite(eventPin, HIGH);
-	delay(10);
-	digitalWrite(eventPin, LOW);
-	delay(100);
-
-	// Serial.print("Pulses: ");
-	// Serial.println(pulses[currentMotor]);
 }
 
 void initMotors()
@@ -326,14 +327,28 @@ void initMotors()
 	pinMode(motorBPin2, OUTPUT);
 }
 
-void initEncoders()
+void MotorCCW()
 {
-	pinMode(encoderA1, INPUT);
-	pinMode(encoderA2, INPUT);
-	pinMode(encoderB1, INPUT);
-	pinMode(encoderB2, INPUT);
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, HIGH);
+	analogWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, 255 - speed[currentMotor]);
+}
 
-	attachInterrupt(0, calcPulse, CHANGE);
+void MotorCW()
+{
+	analogWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, 255 - speed[currentMotor]);
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, HIGH);
+}
+
+void MotorCoast()
+{
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, LOW);
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, LOW);
+}
+
+void MotorBrake()
+{
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, HIGH);
+	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, HIGH);
 }
 
 void resetState()
@@ -342,36 +357,29 @@ void resetState()
 	pulses[MOTOR_B] = 0;
 	direction[MOTOR_A] = false;
 	direction[MOTOR_B] = false;
-	state[MOTOR_A] = IDLE;
-	state[MOTOR_B] = IDLE;
-	Serial.println("State = IDLE");
+	state[MOTOR_A] = COAST;
+	state[MOTOR_B] = COAST;
+	Serial.println("State = COAST");
 }
 
-void calcPulse()
+void initEncoders()
 {
-	pulses[currentMotor]++;
+	pinMode(encoderA, INPUT);
+	pinMode(encoderB, INPUT);
+	attachInterrupt(digitalPinToInterrupt(encoderA), incrementPulseA, FALLING);
+	attachInterrupt(digitalPinToInterrupt(encoderB), incrementPulseB, FALLING);
+	// attachInterrupt(0, incrementPulseA, CHANGE);
+	// attachInterrupt(1, incrementPulseB, CHANGE);
 }
 
-// ******* NOT TESTED
-void calcPulseWithQuadrature()
+void incrementPulseA()
 {
-	int Lstate = digitalRead(encoderA1);
+	pulses[0]++;
+}
 
-	if((encoderLast[currentMotor] == LOW) && Lstate == HIGH) {
-		int val = digitalRead(encoderA2);
-		if(val == LOW && direction[currentMotor]) {
-			direction[currentMotor] = false;	// Reverse
-		} else if(val == HIGH && !direction[currentMotor]) {
-			direction[currentMotor] = true;	// Forward
-		}
-	}
-	encoderLast[currentMotor] = Lstate;
-
-	if(!direction[currentMotor]) {
-		pulses[currentMotor]++;
-	} else {
-		pulses[currentMotor]--;
-	}
+void incrementPulseB()
+{
+	pulses[1]++;
 }
 
 // -----------------------------------------------------------------------------

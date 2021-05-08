@@ -12,8 +12,8 @@
 */
 
 enum Commands {
-    //% block="Idle"
-    IDLE = 0,
+    //% block="Coast"
+    COAST = 0,
     //% block="Forward"
     FORWARD,
     //% block="Backwards"
@@ -39,9 +39,21 @@ enum Commands {
 //% block="ft/RP" weight=100 color=#ff8000 icon="\uf1b2"
 namespace fischertechnikTests
 {
-    let _cmd: Commands = Commands.IDLE;
-    let _pulses: number;
-    let _motor: number;
+    let _cmd: Commands = Commands.COAST;
+    let _pulses0: number;
+    let _pulses1: number;
+    // let _motor: number;
+
+    /**
+     * Initialization
+     */
+    //% block
+    export function init()
+    {
+        _cmd = Commands.COAST;
+        _pulses0 = 0;
+        _pulses1 = 0;
+    }
 
     /**
      * Reads data from Arduino board via I2C.
@@ -51,9 +63,8 @@ namespace fischertechnikTests
     export function readData(arduino: number)
     {
         let value = pins.i2cReadNumber(arduino, NumberFormat.UInt32LE, false);
-        _cmd = value & 0x00FF;
-        _motor = value & 0xFF00 >> 8;
-        _pulses = (value & 0xFFFF0000) >> 16;
+        _pulses0 = value & 0xFFFF;
+        _pulses1 = (value & 0xFFFF0000) >> 16;
     }
 
     /**
@@ -107,7 +118,7 @@ namespace fischertechnikTests
     export function command(): string
     {
         switch(_cmd) {
-            case Commands.IDLE:
+            case Commands.COAST:
                 return "Idle";
             case Commands.FORWARD:
                 return "Forward";
@@ -135,17 +146,17 @@ namespace fischertechnikTests
      * Gets last pulse count from Arduino.
      */
     //% block
-    export function pulses(): number
+    export function pulses(motor: number): number
     {
-        return _pulses;
+        return motor == 1 ? _pulses1 : _pulses0;
     }
 
     /**
      * Gets the number of the current motor.
      */
     //% block
-    export function currentMotor(): number
-    {
-        return _motor;
-    }
+    // export function currentMotor(): number
+    // {
+    //     return _motor;
+    // }
 }

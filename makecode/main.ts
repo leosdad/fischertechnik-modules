@@ -1,67 +1,82 @@
-input.onButtonPressed(Button.A, function () {
-    fischertechnikTests.sendCommand(motorDriver1, "Mt", 1)
-    fischertechnikTests.sendCommand(motorDriver1, "Md", 1)
-    fischertechnikTests.sendCommand(motorDriver1, "Fw", null)
-})
-function init () {
-    led.enable(false)
-    pins.setPull(DigitalPin.P12, PinPullMode.PullUp)
-    makerbit.connectLcd(LCDAddress)
-    makerbit.showStringOnLcd1602("Hello  speed", makerbit.position1602(LcdPosition1602.Pos1), 16)
-    fischertechnikTests.sendCommand(motorDriver1, "Hi", null)
+function toggleOnOff () {
+    on = 1 - on
     showData()
 }
+function Change_speed () {
+    if (speed == 255) {
+        speed = 192
+    } else if (speed == 192) {
+        speed = 128
+    } else if (speed == 128) {
+        speed = 64
+    } else {
+        speed = 255
+    }
+    makerbit.showStringOnLcd1602("" + (speed), makerbit.position1602(LcdPosition1602.Pos14), 3)
+}
+input.onButtonPressed(Button.A, function () {
+    toggleOnOff()
+})
+function demo () {
+    if (on) {
+        fischertechnikTests.sendCommand(motorDriver1Address, "Sp", speed)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Mt", selectedMotor)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Fw", 1)
+        basic.pause(500)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Br", 1)
+        basic.pause(500)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Bw", 1)
+        basic.pause(500)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Co", 1)
+        basic.pause(500)
+        selectedMotor = 1 - selectedMotor
+        showData()
+    }
+}
+function init () {
+    led.enable(false)
+    motorDriver1Address = 8
+    ultrasoundSensorAddress = 10
+    LCDAddress = 39
+    on = 0
+    speed = 255
+    makerbit.connectLcd(LCDAddress)
+    makerbit.showStringOnLcd1602("Speed", makerbit.position1602(LcdPosition1602.Pos8), 5)
+    makerbit.showStringOnLcd1602("A       B", makerbit.position1602(LcdPosition1602.Pos17), 9)
+    fischertechnikTests.init()
+    showData()
+    fischertechnikTests.sendCommand(motorDriver1Address, "Hi", null)
+    fischertechnikTests.sendCommand(motorDriver1Address, "Mt", 1)
+    fischertechnikTests.sendCommand(motorDriver1Address, "Sp", speed)
+    fischertechnikTests.sendCommand(motorDriver1Address, "Mt", 0)
+    fischertechnikTests.sendCommand(motorDriver1Address, "Sp", speed)
+}
 function showData () {
-    fischertechnikTests.readData(motorDriver1)
-    makerbit.showStringOnLcd1602("" + (fischertechnikTests.pulses()), makerbit.position1602(LcdPosition1602.Pos17), 4)
-    makerbit.showStringOnLcd1602(fischertechnikTests.command(), makerbit.position1602(LcdPosition1602.Pos22), 7)
+    fischertechnikTests.readData(motorDriver1Address)
+    makerbit.showStringOnLcd1602("" + (on), makerbit.position1602(LcdPosition1602.Pos1), 1)
+    makerbit.showStringOnLcd1602("" + (speed), makerbit.position1602(LcdPosition1602.Pos14), 3)
+    makerbit.showStringOnLcd1602("" + (fischertechnikTests.pulses(0)), makerbit.position1602(LcdPosition1602.Pos19), 5)
+    makerbit.showStringOnLcd1602("" + (fischertechnikTests.pulses(1)), makerbit.position1602(LcdPosition1602.Pos27), 5)
 }
 input.onButtonPressed(Button.B, function () {
-    Set_speed(0, 0)
+    Change_speed()
 })
-function Set_speed (newSpeed: number, motor: number) {
-    if (newSpeed > 0) {
-        Speed = newSpeed
-    } else {
-        if (Speed > 63) {
-            Speed += -64
-        } else {
-            Speed = 255
-        }
-    }
-    selectedMotor = fischertechnikTests.currentMotor()
-    fischertechnikTests.sendCommand(motorDriver1, "Mt", motor)
-    fischertechnikTests.sendCommand(motorDriver1, "Sp", Speed)
-    fischertechnikTests.sendCommand(motorDriver1, "Mt", fischertechnikTests.currentMotor())
-    makerbit.showStringOnLcd1602("" + (Speed), makerbit.position1602(LcdPosition1602.Pos14), 3)
-}
 pins.onPulsed(DigitalPin.P12, PulseValue.Low, function () {
-    fischertechnikTests.readData(motorDriver1)
+    fischertechnikTests.readData(motorDriver1Address)
     if (fischertechnikTests.command().compare("CCW") == 0) {
         basic.pause(100)
-        fischertechnikTests.sendCommand(motorDriver1, "Ho", null)
+        fischertechnikTests.sendCommand(motorDriver1Address, "Ho", null)
         waitForLimitSwitch = true
     }
 })
-let distance = 0
 let waitForLimitSwitch = false
-let selectedMotor = 0
-let Speed = 0
 let LCDAddress = 0
-let motorDriver1 = 0
-motorDriver1 = 8
-let ultrasoundSensor = 10
-LCDAddress = 39
+let ultrasoundSensorAddress = 0
+let selectedMotor = 0
+let motorDriver1Address = 0
+let speed = 0
+let on = 0
 init()
-fischertechnikTests.sendCommand(motorDriver1, "Go", 400)
 basic.forever(function () {
-    let ultrasoundTest = 0
-    if (ultrasoundTest) {
-        distance = fischertechnikTests.readInt(10)
-        if (distance < 20) {
-            fischertechnikTests.sendCommand(motorDriver1, "Fw", null)
-        }
-        makerbit.showStringOnLcd1602("" + (distance), makerbit.position1602(LcdPosition1602.Pos30), 3)
-        basic.pause(100)
-    }
+    demo()
 })

@@ -6,6 +6,11 @@
 	],
 	"settings": {
 		"cSpell.words": [
+			"MOSI",
+			"PWM",
+			"SCL",
+			"SDA",
+			"SPI",
 			"fischertechnik"
 		]
 	}
