@@ -1,12 +1,14 @@
 // -----------------------------------------------------------------------------
-//
+
 // fischertechnik DC motor with encoder
-//
 // Rubem Pechansky
-//
+
+// References:
+// https://playground.arduino.cc/Main/PinChangeInterrupt/
+
 // -----------------------------------------------------------------------------
 
-#include <Arduino.h>
+// #include <Arduino.h>
 #include <Wire.h>
 
 // -----------------------------------------------------------------------------
@@ -26,18 +28,21 @@
 
 // Arduino pins
 
-#define motorAPin1	10
-#define motorAPin2	11
+#define motorAPin1	3
+#define motorAPin2	9
 #define motorBPin1	5
 #define motorBPin2	6
 
-#define encoderA	2
-#define encoderB	3
+#define servo1		10
+#define servo2		11
 
-#define limitA1Pin	14
-#define limitA2Pin	15
-#define limitB1Pin	16
-#define limitB2Pin	17
+#define encoderA	A0
+#define encoderB	A1
+
+#define limitA1Pin	A6
+#define limitA2Pin	A7
+#define limitB1Pin	A2
+#define limitB2Pin	A3
 
 // I2C commands
 
@@ -91,6 +96,10 @@ byte speed[2] = {255, 255};
 byte mode[2] = {DIRECT, DIRECT};
 uint pulses[2] = {0, 0};
 uint targetPulses[2] = {0, 0};
+int A0count = 0;
+bool A0status = false;
+int A1count = 0;
+bool A1status = false;
 
 // -----------------------------------------------------------------------------
 
@@ -107,9 +116,6 @@ void setup()
 	pinMode(limitA2Pin, INPUT_PULLUP);
 	pinMode(limitB1Pin, INPUT_PULLUP);
 	pinMode(limitB2Pin, INPUT_PULLUP);
-
-	// pinMode(encoderA, INPUT_PULLUP);	// Does nothing: probably 20kΩ is not enough
-	// pinMode(encoderB, INPUT_PULLUP);
 
 	initMotors();
 	initEncoders();
@@ -364,22 +370,42 @@ void resetState()
 
 void initEncoders()
 {
-	pinMode(encoderA, INPUT);
-	pinMode(encoderB, INPUT);
-	attachInterrupt(digitalPinToInterrupt(encoderA), incrementPulseA, FALLING);
-	attachInterrupt(digitalPinToInterrupt(encoderB), incrementPulseB, FALLING);
-	// attachInterrupt(0, incrementPulseA, CHANGE);
-	// attachInterrupt(1, incrementPulseB, CHANGE);
+	pulses[0] = 0;
+	pulses[1] = 0;
+	A0status = false;
+	A1status = false;
+
+	pciSetup(encoderA);
+	pciSetup(encoderA);
 }
 
-void incrementPulseA()
+// Install pin change interrupt for a pin
+
+void pciSetup(byte pin)
 {
-	pulses[0]++;
+	pinMode(pin, INPUT_PULLUP);
+    *digitalPinToPCMSK(pin) |= bit(digitalPinToPCMSKbit(pin));  // enable pin
+    PCIFR |= bit(digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
+    PCICR |= bit(digitalPinToPCICRbit(pin)); // enable interrupt for the group
 }
 
-void incrementPulseB()
+ISR(PCINT1_vect) // handle pin change interrupt for A0 to A5 here
 {
-	pulses[1]++;
+	bool a0 = digitalRead(A0);
+	if(!A0status && a0) {
+		pulses[0]++;
+		A0status = true;
+	} else if(!a0) {
+		A0status = false;
+	}
+
+	bool a1 = digitalRead(A1);
+	if(!A1status && a1) {
+		pulses[1]++;
+		A1status = true;
+	} else if(!a1) {
+		A1status = false;
+	}
 }
 
 // -----------------------------------------------------------------------------
