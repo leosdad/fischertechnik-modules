@@ -42,17 +42,19 @@ namespace fischertechnikTests
     let _cmd: Commands = Commands.COAST;
     let _pulses0: number;
     let _pulses1: number;
-    // let _motor: number;
+    let _motorDriver1: number;
 
     /**
      * Initialization
+     * @param motorDriver1 I²C motor driver 1 address, eg: 8
      */
     //% block
-    export function init()
+    export function init(motorDriver1: number)
     {
         _cmd = Commands.COAST;
         _pulses0 = 0;
         _pulses1 = 0;
+        _motorDriver1 = motorDriver1;
     }
 
     /**
@@ -68,7 +70,7 @@ namespace fischertechnikTests
     }
 
     /**
-     * Reads a single integer from Arduino board via I2C.
+     * Reads a single integer from Arduino board via I²C.
      * @param arduino Arduino board address, eg: 10
      */
     //% block
@@ -79,36 +81,57 @@ namespace fischertechnikTests
     }
 
     /**
-     * Sends a command to Arduino via I2C.
-     * @param arduino Arduino board address, eg: 8
-     * @param str Arduino command, eg: "St"
-     * @param param Parameters, eg: null
+     * Sends a command to the motor drive module.
+     * @param cmd Command, eg: "Sp"
+     * @param motor Motor number, eg: 0
+     * @param param Parameters, eg: 0
      */
     //% block
-    export function sendCommand(arduino: number, str: string, param: number = null)
+    export function sendMotorCommand(cmd: string, motor: number = 0, param: number = 0)
     {
-        if(param !== null) {
-            pins.i2cWriteNumber(
-                arduino,
-                str.charCodeAt(0) | str.charCodeAt(1) << 8 | (param & 0xffff) << 16,
-                NumberFormat.UInt32LE,
-                false
-            )
-        // } else if(str.length > 2) {
+        if(_motorDriver1) {
+            sendCommand(_motorDriver1, cmd, motor, param);
+        } else {
+            console.log('_motorDriver1 not defined');
+        }
+    }
+
+    /**
+     * Sends a command to a module via I²C.
+     * @param address Target module address, eg: 8
+     * @param cmd Command, eg: "Sp"
+     * @param motor Motor number, eg: 0
+     * @param param Parameters, eg: 0
+     */
+    //% block
+    export function sendCommand(address: number, cmd: string, motor: number = 0, param: number = 0)
+    {
+        let bufr = pins.createBuffer(8);
+        bufr.setNumber(NumberFormat.Int16LE, 0, cmd.charCodeAt(0) | cmd.charCodeAt(1) << 8);
+        bufr.setNumber(NumberFormat.Int8LE, 2, motor);
+        bufr.setNumber(NumberFormat.Int16LE, 3, param);
+
+
+        pins.i2cWriteBuffer(_motorDriver1, bufr);
+
+
+        // if(param !== null) {
+        // bufr.setNumber(NumberFormat.Int8LE, 0, cmd.charCodeAt(0));
+        // bufr.setNumber(NumberFormat.Int8LE, 1, cmd.charCodeAt(1));
+        // pins.i2cWriteNumber(
+        //     arduino,
+        //     cmd.charCodeAt(0) | cmd.charCodeAt(1) << 8 | (motor & 0x01) << 12 | (param & 0xffff) << 16,
+        //     NumberFormat.UInt32LE,
+        //     false
+        // )
+        // } else {
         //     pins.i2cWriteNumber(
         //         arduino,
-        //         str.charCodeAt(0) | str.charCodeAt(1) << 8 | str.charCodeAt(2) << 16 | str.charCodeAt(3) << 24,
-        //         NumberFormat.UInt32LE,
+        //         str.charCodeAt(0) | str.charCodeAt(1) << 8,
+        //         NumberFormat.UInt16LE,
         //         false
         //     )
-        } else {
-            pins.i2cWriteNumber(
-                arduino,
-                str.charCodeAt(0) | str.charCodeAt(1) << 8,
-                NumberFormat.UInt16LE,
-                false
-            )
-        }
+        // }
     }
 
     /**
@@ -150,13 +173,4 @@ namespace fischertechnikTests
     {
         return motor == 1 ? _pulses1 : _pulses0;
     }
-
-    /**
-     * Gets the number of the current motor.
-     */
-    //% block
-    // export function currentMotor(): number
-    // {
-    //     return _motor;
-    // }
 }

@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 
-// fischertechnik DC motor with encoder
+// fischertechnik driver for DC motors with encoder and servos
 // Rubem Pechansky
 
 // References:
@@ -25,24 +25,28 @@
 #endif
 
 #define TWOCC(ch0, ch1) ((word)(byte)(ch0) | ((word)(byte)(ch1) << 8))
+#define ATHOME(m)	(!digitalRead(m == MOTOR_A ? motorAHome : motorBHome))
+#define ONEND(m)	(!digitalRead(m == MOTOR_A ? motorAEnd : motorBEnd))
 
 // Arduino pins
 
-#define motorAPin1	3
-#define motorAPin2	9
-#define motorBPin1	5
-#define motorBPin2	6
+#define motorAOut1	3
+#define motorAOut2	11
+#define motorBOut1	5
+#define motorBOut2	6
 
-#define servo1		10
-#define servo2		11
+#define servo1		9
+#define servo2		10
 
 #define encoderA	A0
 #define encoderB	A1
 
-#define limitA1Pin	A6
-#define limitA2Pin	A7
-#define limitB1Pin	A2
-#define limitB2Pin	A3
+#define eventPin	13
+
+#define motorAHome	7
+#define motorBHome	8
+#define motorAEnd	A2
+#define motorBEnd	A3
 
 // I2C commands
 
@@ -54,7 +58,6 @@
 #define cmdHome			TWOCC('H', 'o')
 #define cmdHello		TWOCC('H', 'i')
 #define cmdMode			TWOCC('M', 'd')
-#define cmdSetMotor		TWOCC('M', 't')
 #define cmdSpeed		TWOCC('S', 'p')
 
 // -----------------------------------------------------------------------------
@@ -68,38 +71,38 @@ enum {
 	HOME,
 	CCW,
 	CW,
-	GOHOME,
+	GOINGHOME,
 	BRAKE,
 	RESET,
 };
+
+// Motors
 
 enum {
 	MOTOR_A = 0,
 	MOTOR_B,
 };
 
+// Motor modes
+
 enum {
 	DIRECT = 0,
 	PULSES,
-	ENDLIMITSWITCH,
+	ENDSWITCH,
 };
 
 // -----------------------------------------------------------------------------
 
 // Variables
 
-bool direction[2] = {false, false};
-byte currentMotor = MOTOR_A;
 byte encoderLast[2] = {-1, -1};
 byte state[2] = {COAST, COAST};
 byte speed[2] = {255, 255};
 byte mode[2] = {DIRECT, DIRECT};
 uint pulses[2] = {0, 0};
 uint targetPulses[2] = {0, 0};
-int A0count = 0;
-bool A0status = false;
-int A1count = 0;
-bool A1status = false;
+bool encoderAstatus = false;
+bool encoderBstatus = false;
 
 // -----------------------------------------------------------------------------
 
@@ -112,97 +115,90 @@ void setup()
 	Serial.begin(BAUD_RATE);
 	Serial.println("Arduino reset");
 
-	pinMode(limitA1Pin, INPUT_PULLUP);
-	pinMode(limitA2Pin, INPUT_PULLUP);
-	pinMode(limitB1Pin, INPUT_PULLUP);
-	pinMode(limitB2Pin, INPUT_PULLUP);
+	pinMode(motorAHome, INPUT_PULLUP);
+	pinMode(motorAEnd, INPUT_PULLUP);
+	pinMode(motorBHome, INPUT_PULLUP);
+	pinMode(motorBEnd, INPUT_PULLUP);
+
+	pinMode(eventPin, OUTPUT);
+	digitalWrite(eventPin, LOW);
 
 	initMotors();
 	initEncoders();
-	resetState();
 }
 
 // -----------------------------------------------------------------------------
 
 void loop()
 {
-	switch(state[currentMotor]) {
+	processMotor(MOTOR_A);
+	processMotor(MOTOR_B);
+}
+
+// -----------------------------------------------------------------------------
+
+void processMotor(byte motor)
+{
+	switch(state[motor]) {
 
 		case HOME:
 
-			if(!digitalRead(currentMotor == MOTOR_A ? limitA1Pin : limitB1Pin)) {
-				MotorBrake();
-				resetState();
+			if(ATHOME(motor)) {
+				resetState(motor);
 			} else {
-				pulses[currentMotor] = 0;
-				state[currentMotor] = GOHOME;
-				MotorCW();
-				Serial.println("State = GOHOME");
+				state[motor] = GOINGHOME;
+				MotorCW(motor);
+				Serial.println("State = GOINGHOME");
 			}
 			break;
 
 		case FORWARD:
 
-			if(mode[currentMotor] != DIRECT) {
-				pulses[currentMotor] = 0;
-				state[currentMotor] = CCW;
-				Serial.println("State = CCW");
-			}
-			MotorCCW();
+			pulses[motor] = 0;
+			state[motor] = CCW;
+			Serial.println("State = CCW");
+			MotorCCW(motor);
 			break;
 
 		case BACKWARDS:
 
-			if(mode[currentMotor] != DIRECT) {
-				pulses[currentMotor] = 0;
-				state[currentMotor] = CW;
-				Serial.println("State = CW");
-			}
-			MotorCW();
+			pulses[motor] = 0;
+			state[motor] = CW;
+			Serial.println("State = CW");
+			MotorCW(motor);
 			break;
 
 		case BRAKE:
 
-			MotorBrake();
+			MotorBrake(motor);
 			break;
 
 		case COAST:
 
-			MotorCoast();
+			MotorCoast(motor);
 			break;
 
-		case GOHOME:
+		case GOINGHOME:
 
-			if(!digitalRead(currentMotor == MOTOR_A ? limitA1Pin : limitB1Pin)) {
-				// Stop motor
-				MotorBrake();
-				pulses[currentMotor] = 0;
-				state[currentMotor] = COAST;
-				Serial.println("State = COAST");
+			if(ATHOME(motor)) {
+				MotorBrake(motor);
+				sendSignal();
+				pulses[motor] = 0;
+				state[motor] = BRAKE;
+				Serial.println("State = BRAKE");
 			}
 			break;
 
 		case CW:
 		case CCW:
 
-			if(mode[currentMotor] == PULSES) {
-				if(pulses[currentMotor] >= targetPulses[currentMotor]) {
-					// Stop motor
-					MotorBrake();
-					pulses[currentMotor] = 0;
-					state[currentMotor] = COAST;
-					Serial.println("State = COAST");
-				// } else {
-					// Serial.print(pulses[currentMotor]);
-					// Serial.print(" / ");
-					// Serial.println(speed[currentMotor]);
-				}
-			} else {
-				if(!digitalRead(currentMotor == MOTOR_A ? limitA2Pin : limitB2Pin)) {
-					MotorBrake();
-					state[currentMotor] = COAST;
-					Serial.println("State = COAST");
-				}
+			if((mode[motor] == PULSES && pulses[motor] >= targetPulses[motor]) ||
+				(mode[motor] == ENDSWITCH && ONEND(motor))) {
+				MotorBrake(motor);
+				sendSignal();
+				state[motor] = BRAKE;
+				Serial.print("Pulses: ");
+				Serial.println(pulses[motor]);
 			}
 			break;
 
@@ -215,11 +211,12 @@ void loop()
 
 void receiveEvent(int nBytes)
 {
+	byte motor;
+	char cmd[8];
+
 	// Serial.print("Receiving ");
 	// Serial.print(nBytes);
 	// Serial.print(" bytes: ");
-
-	char cmd[6];
 
 	for(int count = 0; Wire.available(); count++) {
 		cmd[count] = Wire.read();
@@ -231,62 +228,62 @@ void receiveEvent(int nBytes)
 
 		case cmdHello:
 			Serial.println("Hello yourself!");
+			initMotors();
+			MotorCoast(MOTOR_A);
+			MotorCoast(MOTOR_B);
 			requestEvent();
 			break;
 
-		case cmdSetMotor:
-			currentMotor = cmd[2] & 0x01;
-			Serial.print("Current motor is ");
-			Serial.println(currentMotor);
-			break;
-
 		case cmdMode:
-			mode[currentMotor] = cmd[2] & 0x0F;
-			Serial.print("Motor mode is ");
-			Serial.println(mode[currentMotor]);
+			motor = cmd[2] & 0x01;
+			mode[motor] = cmd[3];
+			switch(mode[motor]) {
+				case DIRECT: printMotorCmd(motor, "mode", "DIRECT"); break;
+				case PULSES: printMotorCmd(motor, "mode", "PULSES"); break;
+				case ENDSWITCH: printMotorCmd(motor, "mode", "ENDSWITCH"); break;
+			}
 			break;
 
 		case cmdForward:
-			Serial.println("Moving forward...");
-			state[currentMotor] = FORWARD;
-			Serial.println("State = FORWARD");
+			motor = cmd[2] & 0x01;
+			printMotorCmd(motor, "state", "FORWARD");
+			state[motor] = FORWARD;
 			break;
 
 		case cmdBackwards:
-			Serial.println("Moving backwards...");
-			state[currentMotor] = BACKWARDS;
-			Serial.println("State = BACKWARDS");
+			motor = cmd[2] & 0x01;
+			printMotorCmd(motor, "state", "BACKWARDS");
+			state[motor] = BACKWARDS;
 			break;
 
 		case cmdBrake:
-			Serial.println("Braking...");
-			state[currentMotor] = BRAKE;
-			Serial.println("State = BRAKE");
+			motor = cmd[2] & 0x01;
+			printMotorCmd(motor, "state", "BRAKING");
+			state[motor] = BRAKE;
 			break;
 
 		case cmdCoast:
-			Serial.println("Coasting...");
-			state[currentMotor] = COAST;
-			Serial.println("State = COAST");
+			motor = cmd[2] & 0x01;
+			printMotorCmd(motor, "state", "COASTING");
+			state[motor] = COAST;
 			break;
 
 		case cmdHome:
-			Serial.println("Going home...");
-			state[currentMotor] = HOME;
-			Serial.println("State = HOME");
+			motor = cmd[2] & 0x01;
+			printMotorCmd(motor, "state", "GOING HOME");
+			state[motor] = HOME;
 			break;
 
 		case cmdSpeed:
-			speed[currentMotor] = cmd[2];
-			Serial.print("Speed set to ");
-			Serial.println(speed[currentMotor]);
+			motor = cmd[2] & 0x01;
+			speed[motor] = cmd[3];
+			printMotorCmd(motor, "speed", speed[motor]);
 			break;
 
 		case cmdGoal:
-			targetPulses[currentMotor] = ((word)(byte)(cmd[2]) | ((word)(byte)(cmd[3]) << 8));
-			Serial.print("Goal set to ");
-			Serial.print(targetPulses[currentMotor]);
-			Serial.println(" pulses");
+			motor = cmd[2] & 0x01;
+			targetPulses[motor] = ((word)(byte)(cmd[3]) | ((word)(byte)(cmd[4]) << 8));
+			printMotorCmd(motor, "goal", targetPulses[motor]);
 			break;
 
 		default:
@@ -298,85 +295,107 @@ void receiveEvent(int nBytes)
 	}
 }
 
+// Debug methods
+
+void printMotorCmd(byte motor, char *name, int value)
+{
+	Serial.print("Motor ");
+	Serial.print(motor ? "B " : "A ");
+	Serial.print(name);
+	Serial.print(" is ");
+	Serial.println(value);
+}
+
+void printMotorCmd(byte motor, char *name, char *str)
+{
+	Serial.print("Motor ");
+	Serial.print(motor ? "B " : "A ");
+	Serial.print(name);
+	Serial.print(" is ");
+	Serial.println(str);
+}
+
 // Sends data requested by master
 
 void requestEvent()
 {
 	byte data[4];
 
-	data[0] = pulses[0] & 0xff;
-	data[1] = (pulses[0] & 0xff00) >> 8;
-	data[2] = pulses[1] & 0xff;
-	data[3] = (pulses[1] & 0xff00) >> 8;
+	data[0] = pulses[MOTOR_A] & 0xff;
+	data[1] = (pulses[MOTOR_A] & 0xff00) >> 8;
+	data[2] = pulses[MOTOR_B] & 0xff;
+	data[3] = (pulses[MOTOR_B] & 0xff00) >> 8;
 
 	Wire.write(data, 4);
 
-	Serial.println("--------- Requested:");
-	for(int motor = 0; motor < 2; motor++) {
-		Serial.print("  Motor ");
-		Serial.print(motor);
-		Serial.print(" / state ");
-		Serial.print(state[motor]);
-		Serial.print(" / pulses ");
-		Serial.println(pulses[motor]);
+	for(int motor = MOTOR_A; motor < 2; motor++) {
+		printMotorCmd(motor, "pulses", pulses[motor]);
 	}
-	Serial.println("---------");
+}
+
+void sendSignal()
+{
+	// Signals to the micro:bit that an operation was completed
+
+	digitalWrite(eventPin, HIGH);
+	delay(10);
+	digitalWrite(eventPin, LOW);
+	delay(10);
 }
 
 void initMotors()
 {
 	// TODO: set the PWM frequency 
 
-	pinMode(motorAPin1, OUTPUT);
-	pinMode(motorAPin2, OUTPUT);
-	pinMode(motorBPin1, OUTPUT);
-	pinMode(motorBPin2, OUTPUT);
+	pinMode(motorAOut1, OUTPUT);
+	pinMode(motorAOut2, OUTPUT);
+	pinMode(motorBOut1, OUTPUT);
+	pinMode(motorBOut2, OUTPUT);
+
+	resetState(MOTOR_A);
+	resetState(MOTOR_B);
 }
 
-void MotorCCW()
+void MotorCCW(byte motor)
 {
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, HIGH);
-	analogWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, 255 - speed[currentMotor]);
+	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, HIGH);
+	analogWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, 255 - speed[motor]);
 }
 
-void MotorCW()
+void MotorCW(byte motor)
 {
-	analogWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, 255 - speed[currentMotor]);
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, HIGH);
+	analogWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, 255 - speed[motor]);
+	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, HIGH);
 }
 
-void MotorCoast()
+void MotorCoast(byte motor)
 {
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, LOW);
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, LOW);
+	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, LOW);
+	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, LOW);
 }
 
-void MotorBrake()
+void MotorBrake(byte motor)
 {
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin1 : motorBPin1, HIGH);
-	digitalWrite(currentMotor == MOTOR_A ? motorAPin2 : motorBPin2, HIGH);
+	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, HIGH);
+	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, HIGH);
 }
 
-void resetState()
+void resetState(byte motor)
 {
-	pulses[MOTOR_A] = 0;
-	pulses[MOTOR_B] = 0;
-	direction[MOTOR_A] = false;
-	direction[MOTOR_B] = false;
-	state[MOTOR_A] = COAST;
-	state[MOTOR_B] = COAST;
-	Serial.println("State = COAST");
+	pulses[motor] = 0;
+	state[motor] = COAST;
+	printMotorCmd(motor, "state", state[motor]);
 }
 
 void initEncoders()
 {
 	pulses[0] = 0;
 	pulses[1] = 0;
-	A0status = false;
-	A1status = false;
+	encoderAstatus = false;
+	encoderBstatus = false;
 
 	pciSetup(encoderA);
-	pciSetup(encoderA);
+	pciSetup(encoderB);
 }
 
 // Install pin change interrupt for a pin
@@ -391,20 +410,22 @@ void pciSetup(byte pin)
 
 ISR(PCINT1_vect) // handle pin change interrupt for A0 to A5 here
 {
-	bool a0 = digitalRead(A0);
-	if(!A0status && a0) {
+	bool encA = digitalRead(encoderA);
+
+	if(!encoderAstatus && encA) {
 		pulses[0]++;
-		A0status = true;
-	} else if(!a0) {
-		A0status = false;
+		encoderAstatus = true;
+	} else if(!encA) {
+		encoderAstatus = false;
 	}
 
-	bool a1 = digitalRead(A1);
-	if(!A1status && a1) {
+	bool encB = digitalRead(encoderB);
+
+	if(!encoderBstatus && encB) {
 		pulses[1]++;
-		A1status = true;
-	} else if(!a1) {
-		A1status = false;
+		encoderBstatus = true;
+	} else if(!encB) {
+		encoderBstatus = false;
 	}
 }
 

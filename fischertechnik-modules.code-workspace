@@ -5,6 +5,8 @@
 		}
 	],
 	"settings": {
+		"typescript.validate.enable": false,
+		"javascript.validate.enable": false,
 		"cSpell.words": [
 			"MOSI",
 			"PWM",
