@@ -25,28 +25,28 @@
 #endif
 
 #define TWOCC(ch0, ch1) ((word)(byte)(ch0) | ((word)(byte)(ch1) << 8))
-#define ATHOME(m)	(!digitalRead(m == MOTOR_A ? motorAHome : motorBHome))
-#define ONEND(m)	(!digitalRead(m == MOTOR_A ? motorAEnd : motorBEnd))
+#define ATHOME(m)	(!digitalRead(m == MOTOR_1 ? motor1Home : motor2Home))
+#define ONEND(m)	(!digitalRead(m == MOTOR_1 ? motor1End : motor2End))
 
 // Arduino pins
 
-#define motorAOut1	3
-#define motorAOut2	11
-#define motorBOut1	5
-#define motorBOut2	6
+#define motor1OutA	3
+#define motor1OutB	9
+#define motor2OutA	5
+#define motor2OutB	6
 
-#define servo1		9
+#define servo1		11
 #define servo2		10
 
-#define encoderA	A0
-#define encoderB	A1
+#define encoder1	A0
+#define encoder2	A1
 
-#define eventPin	13
+#define messagePin	13
 
-#define motorAHome	7
-#define motorBHome	8
-#define motorAEnd	A2
-#define motorBEnd	A3
+#define motor1Home	8
+#define motor2Home	7
+#define motor1End	A2
+#define motor2End	A3
 
 // I2C commands
 
@@ -79,8 +79,8 @@ enum {
 // Motors
 
 enum {
-	MOTOR_A = 0,
-	MOTOR_B,
+	MOTOR_1 = 0,
+	MOTOR_2,
 };
 
 // Motor modes
@@ -97,12 +97,13 @@ enum {
 
 byte encoderLast[2] = {-1, -1};
 byte state[2] = {COAST, COAST};
+byte prevState[2] = {255, 255};
 byte speed[2] = {255, 255};
 byte mode[2] = {DIRECT, DIRECT};
 uint pulses[2] = {0, 0};
 uint targetPulses[2] = {0, 0};
-bool encoderAstatus = false;
-bool encoderBstatus = false;
+bool encoder1status = false;	// TODO: Array here
+bool encoder2status = false;
 
 // -----------------------------------------------------------------------------
 
@@ -115,13 +116,13 @@ void setup()
 	Serial.begin(BAUD_RATE);
 	Serial.println("Arduino reset");
 
-	pinMode(motorAHome, INPUT_PULLUP);
-	pinMode(motorAEnd, INPUT_PULLUP);
-	pinMode(motorBHome, INPUT_PULLUP);
-	pinMode(motorBEnd, INPUT_PULLUP);
+	pinMode(motor1Home, INPUT_PULLUP);
+	pinMode(motor1End, INPUT_PULLUP);
+	pinMode(motor2Home, INPUT_PULLUP);
+	pinMode(motor2End, INPUT_PULLUP);
 
-	pinMode(eventPin, OUTPUT);
-	digitalWrite(eventPin, LOW);
+	pinMode(messagePin, OUTPUT);
+	digitalWrite(messagePin, LOW);
 
 	initMotors();
 	initEncoders();
@@ -131,14 +132,43 @@ void setup()
 
 void loop()
 {
-	processMotor(MOTOR_A);
-	processMotor(MOTOR_B);
+	processMotor(MOTOR_1);
+	processMotor(MOTOR_2);
+}
+
+// Test loop
+
+void __loop()
+{
+	byte motor = MOTOR_1;
+
+	MotorCCW(motor);
+	Serial.println("CCW");
+	delay(1000);
+
+	MotorBrake(motor);
+	Serial.println("Brake");
+	delay(1000);
+
+	MotorCW(motor);
+	Serial.println("CW");
+	delay(1000);
+
+	MotorBrake(motor);
+	Serial.println("Brake");
+	delay(1000);
 }
 
 // -----------------------------------------------------------------------------
 
 void processMotor(byte motor)
 {
+	if(state[motor] != prevState[motor]) {
+		Serial.print("State: ");
+		Serial.println(state[motor]);
+		prevState[motor] = state[motor];
+	}
+
 	switch(state[motor]) {
 
 		case HOME:
@@ -182,7 +212,7 @@ void processMotor(byte motor)
 
 			if(ATHOME(motor)) {
 				MotorBrake(motor);
-				sendSignal();
+				sendMessage();
 				pulses[motor] = 0;
 				state[motor] = BRAKE;
 				Serial.println("State = BRAKE");
@@ -192,10 +222,12 @@ void processMotor(byte motor)
 		case CW:
 		case CCW:
 
+			// Serial.println(mode[motor] == PULSES && pulses[motor] >= targetPulses[motor]);
+
 			if((mode[motor] == PULSES && pulses[motor] >= targetPulses[motor]) ||
 				(mode[motor] == ENDSWITCH && ONEND(motor))) {
 				MotorBrake(motor);
-				sendSignal();
+				sendMessage();
 				state[motor] = BRAKE;
 				Serial.print("Pulses: ");
 				Serial.println(pulses[motor]);
@@ -229,8 +261,8 @@ void receiveEvent(int nBytes)
 		case cmdHello:
 			Serial.println("Hello yourself!");
 			initMotors();
-			MotorCoast(MOTOR_A);
-			MotorCoast(MOTOR_B);
+			MotorCoast(MOTOR_1);
+			MotorCoast(MOTOR_2);
 			requestEvent();
 			break;
 
@@ -321,25 +353,25 @@ void requestEvent()
 {
 	byte data[4];
 
-	data[0] = pulses[MOTOR_A] & 0xff;
-	data[1] = (pulses[MOTOR_A] & 0xff00) >> 8;
-	data[2] = pulses[MOTOR_B] & 0xff;
-	data[3] = (pulses[MOTOR_B] & 0xff00) >> 8;
+	data[0] = pulses[MOTOR_1] & 0xff;
+	data[1] = (pulses[MOTOR_1] & 0xff00) >> 8;
+	data[2] = pulses[MOTOR_2] & 0xff;
+	data[3] = (pulses[MOTOR_2] & 0xff00) >> 8;
 
 	Wire.write(data, 4);
 
-	for(int motor = MOTOR_A; motor < 2; motor++) {
+	for(int motor = MOTOR_1; motor < 2; motor++) {
 		printMotorCmd(motor, "pulses", pulses[motor]);
 	}
 }
 
-void sendSignal()
+void sendMessage()
 {
 	// Signals to the micro:bit that an operation was completed
 
-	digitalWrite(eventPin, HIGH);
+	digitalWrite(messagePin, HIGH);
 	delay(10);
-	digitalWrite(eventPin, LOW);
+	digitalWrite(messagePin, LOW);
 	delay(10);
 }
 
@@ -347,37 +379,37 @@ void initMotors()
 {
 	// TODO: set the PWM frequency 
 
-	pinMode(motorAOut1, OUTPUT);
-	pinMode(motorAOut2, OUTPUT);
-	pinMode(motorBOut1, OUTPUT);
-	pinMode(motorBOut2, OUTPUT);
+	pinMode(motor1OutA, OUTPUT);
+	pinMode(motor1OutB, OUTPUT);
+	pinMode(motor2OutA, OUTPUT);
+	pinMode(motor2OutB, OUTPUT);
 
-	resetState(MOTOR_A);
-	resetState(MOTOR_B);
+	resetState(MOTOR_1);
+	resetState(MOTOR_2);
 }
 
 void MotorCCW(byte motor)
 {
-	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, HIGH);
-	analogWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, 255 - speed[motor]);
+	digitalWrite(motor == MOTOR_1 ? motor1OutA : motor2OutA, HIGH);
+	analogWrite(motor == MOTOR_1 ? motor1OutB : motor2OutB, 255 - speed[motor]);
 }
 
 void MotorCW(byte motor)
 {
-	analogWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, 255 - speed[motor]);
-	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, HIGH);
+	analogWrite(motor == MOTOR_1 ? motor1OutA : motor2OutA, 255 - speed[motor]);
+	digitalWrite(motor == MOTOR_1 ? motor1OutB : motor2OutB, HIGH);
 }
 
 void MotorCoast(byte motor)
 {
-	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, LOW);
-	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, LOW);
+	digitalWrite(motor == MOTOR_1 ? motor1OutA : motor2OutA, LOW);
+	digitalWrite(motor == MOTOR_1 ? motor1OutB : motor2OutB, LOW);
 }
 
 void MotorBrake(byte motor)
 {
-	digitalWrite(motor == MOTOR_A ? motorAOut1 : motorBOut1, HIGH);
-	digitalWrite(motor == MOTOR_A ? motorAOut2 : motorBOut2, HIGH);
+	digitalWrite(motor == MOTOR_1 ? motor1OutA : motor2OutA, HIGH);
+	digitalWrite(motor == MOTOR_1 ? motor1OutB : motor2OutB, HIGH);
 }
 
 void resetState(byte motor)
@@ -391,11 +423,11 @@ void initEncoders()
 {
 	pulses[0] = 0;
 	pulses[1] = 0;
-	encoderAstatus = false;
-	encoderBstatus = false;
+	encoder1status = false;
+	encoder2status = false;
 
-	pciSetup(encoderA);
-	pciSetup(encoderB);
+	pciSetup(encoder1);
+	pciSetup(encoder2);
 }
 
 // Install pin change interrupt for a pin
@@ -410,22 +442,23 @@ void pciSetup(byte pin)
 
 ISR(PCINT1_vect) // handle pin change interrupt for A0 to A5 here
 {
-	bool encA = digitalRead(encoderA);
+	bool enc1 = digitalRead(encoder1);
 
-	if(!encoderAstatus && encA) {
+	if(!encoder1status && enc1) {
 		pulses[0]++;
-		encoderAstatus = true;
-	} else if(!encA) {
-		encoderAstatus = false;
+		// Serial.println(pulses[0]);
+		encoder1status = true;
+	} else if(!enc1) {
+		encoder1status = false;
 	}
 
-	bool encB = digitalRead(encoderB);
+	bool enc2 = digitalRead(encoder2);
 
-	if(!encoderBstatus && encB) {
+	if(!encoder2status && enc2) {
 		pulses[1]++;
-		encoderBstatus = true;
-	} else if(!encB) {
-		encoderBstatus = false;
+		encoder2status = true;
+	} else if(!enc2) {
+		encoder2status = false;
 	}
 }
 
