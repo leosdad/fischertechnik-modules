@@ -8,15 +8,16 @@
 
 // -----------------------------------------------------------------------------
 
-// #include <Arduino.h>
+#include <Arduino.h>
 #include <Wire.h>
+#include "motor-driver.h"
 
 // -----------------------------------------------------------------------------
 
 // Constants
 
 #define BAUD_RATE		57600
-#define SLAVE_ADDRESS	8
+#define SLAVE_ADDRESS	0x08
 
 // Macros
 
@@ -48,17 +49,29 @@
 #define motor1End	A2
 #define motor2End	A3
 
-// I2C commands
+// // I2C commands
+// // TODO: move to header
 
-#define cmdBackwards	TWOCC('B', 'w')
-#define cmdBrake		TWOCC('B', 'r')
-#define cmdCoast		TWOCC('C', 'o')
-#define cmdForward		TWOCC('F', 'w')
-#define cmdGoal			TWOCC('G', 'o')
-#define cmdHome			TWOCC('H', 'o')
-#define cmdHello		TWOCC('H', 'i')
-#define cmdMode			TWOCC('M', 'd')
-#define cmdSpeed		TWOCC('S', 'p')
+// #define cmdHello		0x21
+
+// #define cmdOutput1		0x31
+// #define cmdOutput2		0x32
+// #define cmdOutput3		0x33
+// #define cmdOutput4		0x34
+
+// // #define cmdDigitalRead	0x31
+// // #define cmdAnalogRead	0x32
+// // #define cmdDigitalWrite	0x33
+// // #define cmdAnalogWrite	0x34
+
+// #define cmdMode			0x40
+// #define cmdSpeed		0x41
+// #define cmdCoast		0x42
+// #define cmdForward		0x43
+// #define cmdBackwards	0x44
+// #define cmdBrake		0x45
+// #define cmdHome			0x46
+// #define cmdTarget		0x49
 
 // -----------------------------------------------------------------------------
 
@@ -132,8 +145,15 @@ void setup()
 
 void loop()
 {
-	processMotor(MOTOR_1);
-	processMotor(MOTOR_2);
+	if(mode[MOTOR_1] == DIRECT) {
+	} else {
+		processMotor(MOTOR_1);
+	}
+
+	if(mode[MOTOR_2] == DIRECT) {
+	} else {
+		processMotor(MOTOR_2);
+	}
 }
 
 // Test loop
@@ -244,7 +264,7 @@ void processMotor(byte motor)
 void receiveEvent(int nBytes)
 {
 	byte motor;
-	char cmd[8];
+	char cmd[8];	// Not all bytes are used
 
 	// Serial.print("Receiving ");
 	// Serial.print(nBytes);
@@ -256,7 +276,37 @@ void receiveEvent(int nBytes)
 
 	// Received commands
 
-	switch(((word)(byte)cmd[0] | ((word)(byte)cmd[1] << 8))) {
+	// switch(((word)(byte)cmd[0] | ((word)(byte)cmd[1] << 8))) {
+	switch((byte)cmd[0]) {
+
+		case cmdOutput1:
+			digitalWrite(motor1OutA, cmd[1] & 0x01 ? HIGH : LOW);
+			Serial.print("Output 1: ");
+			Serial.println(cmd[1] & 0x01);
+			break;
+
+		case cmdOutput2:
+			digitalWrite(motor1OutB, cmd[1] & 0x01 ? HIGH : LOW);
+			Serial.print("Output 2: ");
+			Serial.println(cmd[1] & 0x01);
+			break;
+
+		case cmdOutput3:
+			digitalWrite(motor2OutA, cmd[1] & 0x01 ? HIGH : LOW);
+			Serial.print("Output 3: ");
+			Serial.println(cmd[1] & 0x01);
+			break;
+
+		case cmdOutput4:
+			digitalWrite(motor2OutB, cmd[1] & 0x01 ? HIGH : LOW);
+			Serial.print("Output 4: ");
+			Serial.println(cmd[1] & 0x01);
+			break;
+
+		// case cmdDigitalRead:
+		// 	digitalRead(cmd[1]);
+		// 	sendMessage();
+		// 	break;
 
 		case cmdHello:
 			Serial.println("Hello yourself!");
@@ -267,8 +317,8 @@ void receiveEvent(int nBytes)
 			break;
 
 		case cmdMode:
-			motor = cmd[2] & 0x01;
-			mode[motor] = cmd[3];
+			motor = cmd[1] & 0x01;
+			mode[motor] = cmd[2];
 			switch(mode[motor]) {
 				case DIRECT: printMotorCmd(motor, "mode", "DIRECT"); break;
 				case PULSES: printMotorCmd(motor, "mode", "PULSES"); break;
@@ -276,46 +326,46 @@ void receiveEvent(int nBytes)
 			}
 			break;
 
+		case cmdSpeed:
+			motor = cmd[1] & 0x01;
+			speed[motor] = cmd[3];
+			printMotorCmd(motor, "speed", speed[motor]);
+			break;
+
+		case cmdCoast:
+			motor = cmd[1] & 0x01;
+			printMotorCmd(motor, "state", "COASTING");
+			state[motor] = COAST;
+			break;
+
 		case cmdForward:
-			motor = cmd[2] & 0x01;
+			motor = cmd[1] & 0x01;
 			printMotorCmd(motor, "state", "FORWARD");
 			state[motor] = FORWARD;
 			break;
 
 		case cmdBackwards:
-			motor = cmd[2] & 0x01;
+			motor = cmd[1] & 0x01;
 			printMotorCmd(motor, "state", "BACKWARDS");
 			state[motor] = BACKWARDS;
 			break;
 
 		case cmdBrake:
-			motor = cmd[2] & 0x01;
+			motor = cmd[1] & 0x01;
 			printMotorCmd(motor, "state", "BRAKING");
 			state[motor] = BRAKE;
 			break;
 
-		case cmdCoast:
-			motor = cmd[2] & 0x01;
-			printMotorCmd(motor, "state", "COASTING");
-			state[motor] = COAST;
-			break;
-
 		case cmdHome:
-			motor = cmd[2] & 0x01;
+			motor = cmd[1] & 0x01;
 			printMotorCmd(motor, "state", "GOING HOME");
 			state[motor] = HOME;
 			break;
 
-		case cmdSpeed:
-			motor = cmd[2] & 0x01;
-			speed[motor] = cmd[3];
-			printMotorCmd(motor, "speed", speed[motor]);
-			break;
-
-		case cmdGoal:
-			motor = cmd[2] & 0x01;
-			targetPulses[motor] = ((word)(byte)(cmd[3]) | ((word)(byte)(cmd[4]) << 8));
-			printMotorCmd(motor, "goal", targetPulses[motor]);
+		case cmdTarget:
+			motor = cmd[1] & 0x01;
+			targetPulses[motor] = ((word)(byte)(cmd[2]) | ((word)(byte)(cmd[3]) << 8));
+			printMotorCmd(motor, "target", targetPulses[motor]);
 			break;
 
 		default:
