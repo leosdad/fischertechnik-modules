@@ -2,6 +2,9 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "..\\..\\..\\..\\Google Drive\\Desenv\\Arduino\\libraries\\ftmodules"
 		}
 	],
 	"settings": {
