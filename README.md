@@ -9,3 +9,7 @@ This module uses the RCWL-1601 sensor, a smaller alternative to the ubiquitous H
 ### I²C motor driver module
 
 This is a module to control two encoder motors and two servos via I2C. It uses an Arduino Pro Mini clone and a DRV8833 board.
+
+### Seven-segment display module
+
+Designed for two triple common anode 7-segment LED displays, with multiplexing and minimal part count.
