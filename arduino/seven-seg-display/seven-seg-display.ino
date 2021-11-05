@@ -7,13 +7,12 @@ Based on: https://github.com/gbhug5a/7-Segment-Displays-Multiplex-by-Segment
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <Ftmodules.h>
-#include "Simpletypes.h"
+#include <FtModules.h>
 
 #pragma region Hardware constants ----------------------------------------------
 
 #define BAUD_RATE			57600
-#define ADDRESS				0x09
+#define SEVEN_SEG_ADDRESS	0x09
 
 // Main constants
 
@@ -64,14 +63,6 @@ const byte G = bit(6);
 
 #pragma endregion --------------------------------------------------------------
 
-#pragma region Display constants -----------------------------------------------
-
-// enums
-
-const byte MAXCHARS = 80;	// TODO: passar para ftmodules
-
-#pragma endregion --------------------------------------------------------------
-
 #pragma region Enums -----------------------------------------------------------
 
 // I²C commands
@@ -82,35 +73,6 @@ enum class i2cCommands
 	Flash,
 	Rotate
 };
-
-#pragma endregion --------------------------------------------------------------
-
-#pragma region Variables -------------------------------------------------------
-
-// Array allows using any number of digits - add others as needed
-
-// The digit's pin number
-byte CACCpin[] = {CACC0pin, CACC1pin, CACC2pin, CACC3pin, CACC4pin, CACC5pin};
-byte DIGIT[DIGITS];					// And its displayed character
-byte tempDigits[DIGITS];			// Used for animations
-
-unsigned long prevMs;
-unsigned long currentMs;
-
-char str[MAXCHARS + 1];
-
-byte segmentCounter;			// Segment counter - count up to SEGMENTS value
-byte currentSegment;			// Current segment bit position
-byte milliCount = 0;			// Number of millis changes so far
-
-unsigned long ms = 0;			// Used for animations
-byte auxPos = 0;				// Used in rotateString, flash
-byte textSize = 0;				// Used in rotateString
-i2cCommands mode = i2cCommands::Default;
-unsigned int flashPeriod = 0;
-unsigned int rotatePeriod = 0;
-
-unsigned long timeout = 0;
 
 #pragma endregion --------------------------------------------------------------
 
@@ -201,41 +163,48 @@ byte ascii[] = {
 
 #pragma endregion --------------------------------------------------------------
 
+#pragma region Variables -------------------------------------------------------
+
+// Array allows using any number of digits - add others as needed
+
+// The digit's pin number
+byte CACCpin[] = {CACC0pin, CACC1pin, CACC2pin, CACC3pin, CACC4pin, CACC5pin};
+byte DIGIT[DIGITS];					// And its displayed character
+byte tempDigits[DIGITS];			// Used for animations
+
+unsigned long prevMs;
+unsigned long currentMs;
+
+char str[FtModules::SevenSegDisplay::maxDisplayChars + 1];
+
+byte segmentCounter;			// Segment counter - count up to SEGMENTS value
+byte currentSegment;			// Current segment bit position
+byte milliCount = 0;			// Number of millis changes so far
+
+unsigned long ms = 0;			// Used for animations
+byte auxPos = 0;				// Used in rotateString, flash
+byte textSize = 0;				// Used in rotateString
+i2cCommands mode = i2cCommands::Default;
+unsigned int flashPeriod = 0;
+unsigned int rotatePeriod = 0;
+unsigned long timeout = 0;
+bool testMode = false;
+
+#pragma endregion --------------------------------------------------------------
+
 #pragma region Setup -----------------------------------------------------------
 
 void setup()
 {
-	Serial.begin(BAUD_RATE);
-	Serial.println("Display started");
+	// Serial.begin(BAUD_RATE);
+	// Serial.println("Display started");
 
-	Wire.begin(ADDRESS);
+	Wire.begin(SEVEN_SEG_ADDRESS);
 	Wire.onReceive(receiveEvent);
 
-	// Initialize segment pins to OUTPUT, off
+	resetDisplay();
 
-	for(int i = 0; i < SEGMENTS; i++) {
-		pinMode(segArray[i], OUTPUT);
-		digitalWrite(segArray[i], SEGOFF);
-	}
-
-	// Same for CACC pins
-
-	for(int i = 0; i < DIGITS; i++) {
-		pinMode(CACCpin[i], OUTPUT);
-		digitalWrite(CACCpin[i], CACCOFF);
-	}
-
-	clearString();
-
-	blankDisplay();
-
-	// Initialize so first refresh will re-init everything
-
-	segmentCounter = SEGMENTS - 1;	// Segments counter - set to end
-	currentSegment = bit(SEGMENTS - 1); // Bit position of last segment
-
-	prevMs = millis();
-
+	// Enter test mode
 	// testAllChars();
 }
 
@@ -253,6 +222,94 @@ void loop()
 			break;
 		case i2cCommands::Rotate:
 			rotate(rotatePeriod);
+			break;
+	}
+}
+
+#pragma endregion --------------------------------------------------------------
+
+#pragma region Command processor -----------------------------------------------
+
+// Receives data from master
+void receiveEvent(int nBytes)
+{
+	if(testMode) {
+		return;
+	}
+
+	byte motor;
+	char cmd[FtModules::SevenSegDisplay::maxDisplayChars];
+	ulong ms = millis();
+
+	Serial.println(nBytes);
+
+	for(int count = 0; count < FtModules::SevenSegDisplay::maxDisplayChars; count++) {
+		cmd[count] = Wire.available() ? Wire.read() : '\x0';
+	}
+
+	if(ms <= timeout) {
+		// Serial.print("Not yet: ");
+		// Serial.print(ms);
+		// Serial.print(" / ");
+		// Serial.print(timeout);
+		// Serial.println("");
+		return;
+	} else {
+		timeout = 0;
+	}
+
+	// Serial.println("Received");
+
+	// Received commands
+
+	switch((byte)cmd[0]) {
+
+		case FtModules::SevenSegDisplay::cmdBlank:
+			blankDisplay();
+			break;
+
+		case FtModules::SevenSegDisplay::cmdTest:
+			lightAllSegments();
+			break;
+
+		case FtModules::SevenSegDisplay::cmdDisplay:
+			// Serial.println(cmd + 1);
+			displayString(cmd + 1);
+			break;
+
+		case FtModules::SevenSegDisplay::cmdHold:
+			timeout = ms + (cmd[2] << 8) + (unsigned char)cmd[1];
+			// Serial.print("Set: ");
+			// Serial.print(ms);
+			// Serial.print(" / ");
+			// Serial.print(timeout);
+			// Serial.println(" -----------------");
+			break;
+
+		case FtModules::SevenSegDisplay::cmdFlash:
+			flashPeriod = (cmd[2] << 8) + (unsigned char)cmd[1];
+			rotatePeriod = 0;
+			mode = i2cCommands::Flash;
+			break;
+
+		case FtModules::SevenSegDisplay::cmdRotate:
+			rotatePeriod = (cmd[2] << 8) + (unsigned char)cmd[1];
+			flashPeriod = 0;
+			mode = i2cCommands::Rotate;
+			break;
+
+		case FtModules::SevenSegDisplay::cmdStop:
+			mode = i2cCommands::Default;
+			flashPeriod = 0;
+			rotatePeriod = 0;
+			break;
+
+		default:
+			// Command not found
+			displayString("Err 01");
+			// Serial.print("Unknown command: \"");
+			// Serial.print(cmd[0]);
+			// Serial.println("\"");
 			break;
 	}
 }
@@ -305,75 +362,34 @@ void segmentDriver()
 	}
 }
 
-// Receives data from master
-void receiveEvent(int nBytes)
+void resetDisplay()
 {
-	byte motor;
-	char cmd[MAXCHARS];
-	ulong ms = millis();
+	// Initialize segment pins to OUTPUT, off
 
-	for(int count = 0; count < MAXCHARS; count++) {
-		cmd[count] = Wire.available() ? Wire.read() : '\x0';
+	for(int i = 0; i < SEGMENTS; i++) {
+		pinMode(segArray[i], OUTPUT);
+		digitalWrite(segArray[i], SEGOFF);
 	}
 
-	if(ms <= timeout) {
-		Serial.print("Not yet: ");
-		Serial.print(ms);
-		Serial.print(" / ");
-		Serial.print(timeout);
-		Serial.println("");
-		return;
-	} else {
-		timeout = 0;
+	// Same for CACC pins
+
+	for(int i = 0; i < DIGITS; i++) {
+		pinMode(CACCpin[i], OUTPUT);
+		digitalWrite(CACCpin[i], CACCOFF);
 	}
 
-	// Serial.println("Received");
+	clearString();
 
-	// Received commands
+	// Set all digits to blank
 
-	switch((byte)cmd[0]) {
+	blankDisplay();
 
-		case Ftmodules::SevenSegDisplay::cmdBlank:
-			blankDisplay();
-			break;
+	// Initialize so first refresh will re-init everything
 
-		case Ftmodules::SevenSegDisplay::cmdTest:
-			testAllSegments();
-			break;
+	segmentCounter = SEGMENTS - 1;	// Segments counter - set to end
+	currentSegment = bit(SEGMENTS - 1); // Bit position of last segment
 
-		case Ftmodules::SevenSegDisplay::cmdDisplay:
-			Serial.println(cmd + 1);
-			displayString(cmd + 1);
-			break;
-
-		case Ftmodules::SevenSegDisplay::cmdHold:
-			timeout = ms + (cmd[2] << 8) + (unsigned char)cmd[1];
-			Serial.print("Set: ");
-			Serial.print(ms);
-			Serial.print(" / ");
-			Serial.print(timeout);
-			Serial.println(" -----------------");
-			break;
-
-		case Ftmodules::SevenSegDisplay::cmdFlash:
-			flashPeriod = (cmd[2] << 8) + (unsigned char)cmd[1];
-			mode = i2cCommands::Flash;
-			break;
-
-		case Ftmodules::SevenSegDisplay::cmdRotate:
-			rotatePeriod = (cmd[2] << 8) + (unsigned char)cmd[1];
-			mode = i2cCommands::Rotate;
-			break;
-
-		case Ftmodules::SevenSegDisplay::cmdStop:
-			mode = i2cCommands::Default;
-			break;
-
-		default:
-			// Command not found
-			displayString("Err 01");
-			break;
-	}
+	prevMs = millis();
 }
 
 // Sets all digits to blank
@@ -388,6 +404,20 @@ void blankDisplay()
 	}
 }
 
+void lightAllSegments()
+{
+	for(int i = 0; i < DIGITS; i++) {
+		DIGIT[i] = c8;
+	}
+}
+
+void clearString()
+{
+	for(int i = 0; i < FtModules::SevenSegDisplay::maxDisplayChars; i++) {
+		str[i] = '\x0';
+	}
+}
+
 void displayString(char *text)
 {
 	// if(currentMs <= timeout) {
@@ -396,6 +426,7 @@ void displayString(char *text)
 
 	textSize = strlen(text);
 	clearString();
+	// Serial.println(textSize);
 	strcpy(str, text);
 
 	for(int i = 0; i < DIGITS; i++) {
@@ -441,26 +472,13 @@ void rotate(unsigned int rotatePeriod)
 	}
 }
 
-void clearString()
-{
-	for(int i = 0; i < MAXCHARS; i++) {
-		str[i] = '\x0';
-	}
-}
-
 #pragma endregion --------------------------------------------------------------
 
 #pragma region Test functions --------------------------------------------------
 
-void testAllSegments()
-{
-	for(int i = 0; i < DIGITS; i++) {
-		DIGIT[i] = c8;
-	}
-}
-
 void testAllChars()
 {
+	testMode = true;
 	displayString(
 		// "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG "
 		// "PACK MY BOX WITH FIVE DOZEN LIQUOR JUGS "
