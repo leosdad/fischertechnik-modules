@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 //
-// Ultrasonic sensor
+// RCWL-1601 Ultrasonic sensor
 //
 // Rubem Pechansky
 // Based on: Arduino ultrasonic sensor HC-SR04 by Arbi Abdul Jabbaar
@@ -8,13 +8,25 @@
 //
 // -----------------------------------------------------------------------------
 
+#include <Arduino.h>
 #include <Wire.h>
 
 // -----------------------------------------------------------------------------
 
+/*
+
+TODO: A testar: se A4 (SDA) for aterrado no setup, isso significa que um pino PWM passa a ser usado como uma saída analógica para informar a distância em cm, convertida para mV (2 a 450)
+
+Precisa de um LGT8F328P (mas aí a coincidência de pinout com o RCWL-1601 não existe mais), para que a saída analógica seja real, e de um cabo com 5 vias. Ou um 4066 para comutar os sinais, ou de duas opções internas para conectar os cabos.
+
+Outra opção seria um módulo externo com o LGT8F328P, que só faz a leitura do valor via I²C e converte para um valor analógico (2 a 450 mV)
+
+*/
+
 // Constants
 
-#define BAUD_RATE		57600
+// #define BAUD_RATE		57600
+
 #define SLAVE_ADDRESS	10
 #define SOUND_K			(0.034 / 2) // Speed of sound wave divided by 2
 
