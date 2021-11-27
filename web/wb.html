@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+<!--
+	Adapted from:
+	https://github.com/harbaum/WebBTSmart/blob/master/control.html
+	by Till Harbaum
+-->
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name = "format-detection" content = "telephone=no"/>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="viewport" 
+      content="user-scalable=no, initial-scale=1, maximum-scale=1, 
+        minimum-scale=1, width=device-width" />
+	<title>WebBluetooth BT Smart Controller</title>
+</head>
+
+<body>
+
+	<style>
+		body {
+			font-family: Arial, Helvetica, sans-serif;
+			padding: 10px;
+		}
+		input[type=range]{
+			writing-mode: bt-lr; /* IE */
+			-webkit-appearance: slider-vertical; /* WebKit */
+			/* width: 50px;
+			height: 200px;
+			padding: 0 24px;
+			outline: none;
+			background:transparent; */
+		}
+	</style>
+
+	<h2>BT Smart Controller</h2>
+
+	<!-- The user interface itself is written in html -->
+
+	<div>
+		<button disabled="true" id="btn" onclick="onClick()">Connect</button>
+		<span id="message" style="font-size: 75%"></span>
+	</div>
+
+	<!-- LED color selection -->
+	<!-- <hr>
+	<div>
+		LED:
+		<input class="led" disabled="true" type="radio" name="color" id="blue"><label for="blue">Blue</label>
+		<input class="led" disabled="true" type="radio" name="color" id="orange"><label for="orange">Orange</label>
+	</div> -->
+
+	<!-- motor output control -->
+	<hr>
+	<div style="display:flex; justify-content: space-evenly;">
+		<input class="motor" disabled="true" type="range" min="-100" max="100" value="0" id="m1">
+		<input class="motor" disabled="true" type="range" min="-100" max="100" value="0" id="m2">
+	</div>
+
+	<hr>
+
+	<span>
+		<!-- input control -->
+		<span>
+			I1:
+			<input class="ival" disabled="true" type="text" id="i1v" value="-" size="5">
+			<button class="iupd" disabled="true" id="i1vget">Update</button>
+			<input class="imode" disabled="true" type="radio" name="i1m" id="i1r"><label for="i1r">Ω</label>
+			<input class="imode" disabled="true" type="radio" name="i1m" id="i1u"><label for="i1u">V</label>
+			<br>
+		</span>
+		<span>
+			I2:
+			<input class="ival" disabled="true" type="text" id="i2v" value="-" size="5">
+			<button class="iupd" disabled="true" id="i2vget">Update</button>
+			<input class="imode" disabled="true" type="radio" name="i2m" id="i2r"><label for="i2r">Ω</label>
+			<input class="imode" disabled="true" type="radio" name="i2m" id="i2u"><label for="i2u">V</label>
+			<br>
+		</div>
+		<span>
+			I3:
+			<input class="ival" disabled="true" type="text" id="i3v" value="-" size="5">
+			<button class="iupd" disabled="true" id="i3vget">Update</button>
+			<input class="imode" disabled="true" type="radio" name="i3m" id="i3r"><label for="i3r">Ω</label>
+			<input class="imode" disabled="true" type="radio" name="i3m" id="i3u"><label for="i3u">V</label>
+			<br>
+		</div>
+		<span>
+			I4:
+			<input class="ival" disabled="true" type="text" id="i4v" value="-" size="5">
+			<button class="iupd" disabled="true" id="i4vget">Update</button>
+			<input class="imode" disabled="true" type="radio" name="i4m" id="i4r"><label for="i4r">Ω</label>
+			<input class="imode" disabled="true" type="radio" name="i4m" id="i4u"><label for="i4u">V</label>
+			<br>
+		</span>
+	</div>
+
+	<!-- the device is controlled from javascript -->
+	<script>
+
+		// List of services/characteristics required
+
+		btsc = {
+			"srvs": {
+				"led": {
+					"uuid": "8ae87702-ad7d-11e6-80f5-76304dec7eb7",
+					"chrs": {
+						// write 1 byte: 00 = blue, 01 = orange 
+						"ch": { "uuid": "8ae87e32-ad7d-11e6-80f5-76304dec7eb7" },
+					}
+				},
+				"output": {
+					"uuid": "8ae883b4-ad7d-11e6-80f5-76304dec7eb7",
+					"chrs": {
+						// write 1 byte, valid range: –100..100
+						"m1": { "uuid": "8ae8860c-ad7d-11e6-80f5-76304dec7eb7" },
+						"m2": { "uuid": "8ae88b84-ad7d-11e6-80f5-76304dec7eb7" }
+					}
+				},
+				"imode": {
+					"uuid": "8ae88d6e-ad7d-11e6-80f5-76304dec7eb7",
+					"chrs": {
+						// write 1 byte: 0x0a = voltage, 0x0b = resistance 
+						"i1m": { "uuid": "8ae88efe-ad7d-11e6-80f5-76304dec7eb7" },
+						"i2m": { "uuid": "8ae89084-ad7d-11e6-80f5-76304dec7eb7" },
+						"i3m": { "uuid": "8ae89200-ad7d-11e6-80f5-76304dec7eb7" },
+						"i4m": { "uuid": "8ae89386-ad7d-11e6-80f5-76304dec7eb7" }
+					}
+				},
+				"input": {
+					"uuid": "8ae8952a-ad7d-11e6-80f5-76304dec7eb7",
+					"chrs": {
+						// read 2 bytes: value in ohms or volt 
+						"i1v": {
+							"uuid": "8ae89a2a-ad7d-11e6-80f5-76304dec7eb7",
+							"notify": inputListener
+						},
+						"i2v": {
+							"uuid": "8ae89bec-ad7d-11e6-80f5-76304dec7eb7",
+							"notify": inputListener
+						},
+						"i3v": {
+							"uuid": "8ae89dc2-ad7d-11e6-80f5-76304dec7eb7",
+							"notify": inputListener
+						},
+						"i4v": {
+							"uuid": "8ae89f66-ad7d-11e6-80f5-76304dec7eb7",
+							"notify": inputListener
+						}
+					}
+				}
+			}
+		};
+
+		if(navigator.bluetooth === undefined) {
+			message("<font color=\"red\">" +
+				"This browser does not support Web Bluetooth</font>");
+		} else {
+			message("Web Bluetooth available");
+			document.getElementById("btn").disabled = false;
+		}
+
+		// --------------------------------------------------- General functions
+
+		// function timerCallback(ch, state)
+		// {
+		// 	message(state ? "<font color=\"orange\">orange</font>" :
+		// 		"<font color=\"blue\">blue</font>");
+		// 	ch.writeValue(new Uint8Array([state]));
+		// 	setTimeout(timerCallback.bind(this, ch, !state), 500);
+		// }
+
+		function message(text)
+		{
+			msg = document.getElementById("message");
+			msg.innerHTML = text;
+		}
+
+		// Write a byte to the given service/characteristic
+		function writeByte(srv, ch, val)
+		{
+			btsc.srvs[srv].chrs[ch].handle.writeValue(new Uint8Array([val]));
+		}
+
+		// -------------------------------------------------------- LED handling
+
+		function onLedColorClicked(a)
+		{
+			writeByte("led", "ch", { "blue": 0x00, "orange": 0x01 }[a.srcElement.id]);
+		}
+
+		// Enable all LED processing
+		function enableLed()
+		{
+			leds = document.getElementsByClassName("led");
+			Array.prototype.forEach.call(leds, function(element) {
+				element.disabled = false;
+				element.addEventListener("click", onLedColorClicked);
+			});
+		}
+
+		// ------------------------------------------------------ Motor handling
+
+		function onMotorValueChanged(a)
+		{
+			writeByte("output", a.srcElement.id, a.srcElement.value);
+		}
+
+		// Enable all motor processing
+		function enableMotor()
+		{
+			motors = document.getElementsByClassName("motor");
+			Array.prototype.forEach.call(motors, function(element) {
+				element.disabled = false;
+				element.addEventListener("input", onMotorValueChanged);
+			});
+		}
+
+		// ------------------------------------------------------ Input handling
+
+		function onInputModeClicked(a)
+		{
+			writeByte("imode", a.srcElement.name, { "u": 0x0a, "r": 0x0b }
+				[a.srcElement.id[2]]);
+		}
+
+		function inputListener(a)
+		{
+			// Get our local name of this characteristic
+			name = Object.keys(btsc.srvs["input"].chrs).find(key =>
+				btsc.srvs["input"].chrs[key].uuid === a.target.uuid);
+
+			document.getElementById(name).value = a.target.value.getUint16(0, true).toString();
+		}
+
+		function onInputUpdateClicked(a)
+		{
+			// This could be evaluated immediately. But it also triggers a notification and
+			// will finally cause inputListener to be called
+			btsc.srvs["input"].chrs[a.target.id.substring(0, 3)].handle.readValue();
+		}
+
+		// Enable all input processing
+		function enableInput()
+		{
+			imodes = document.getElementsByClassName("imode");
+			Array.prototype.forEach.call(imodes, function(element) {
+				element.disabled = false;
+				element.addEventListener("click", onInputModeClicked);
+			});
+			iupd = document.getElementsByClassName("iupd");
+			Array.prototype.forEach.call(iupd, function(element) {
+				element.disabled = false;
+				element.addEventListener("click", onInputUpdateClicked);
+			});
+		}
+
+		// Get the next characteristic request
+		function getNextRequest()
+		{
+			// walk over all characteristics
+			for(var srv in btsc.srvs)
+			{
+				if(btsc.srvs[srv].handle === undefined) {
+					btsc.server.getPrimaryService(btsc.srvs[srv].uuid).then(service => {
+						// console.log("service:", service);
+						btsc.srvs[srv].handle = service;
+						getNextRequest();
+					});
+					return;
+				}
+
+				for(var ch in btsc.srvs[srv].chrs)
+				{
+					if(btsc.srvs[srv].chrs[ch].handle === undefined)
+					{
+						btsc.srvs[srv].handle.getCharacteristic(
+							btsc.srvs[srv].chrs[ch].uuid).then(characteristic => {
+								// console.log("characteristic:", characteristic);
+								btsc.srvs[srv].chrs[ch].handle = characteristic;
+
+								// check if we want to receive notifications
+								if("notify" in btsc.srvs[srv].chrs[ch]) {
+									// console.log("wants to be notfied");
+									characteristic.startNotifications().then(_ => {
+										characteristic.addEventListener('characteristicvaluechanged',
+											btsc.srvs[srv].chrs[ch].notify);
+										getNextRequest();
+									});
+								} else {
+									getNextRequest();
+								}
+							});
+						return;
+					}
+				}
+			}
+
+			message("Connected");
+
+			// Disable connect button as we are now connected
+			document.getElementById("btn").disabled = true;
+
+			// enable the GUI
+			enableLed();
+			enableMotor();
+			enableInput();
+
+			return;
+		}
+
+		function onClick()
+		{
+			// Build list of required services
+			optionalServices = []
+			for(var srv in btsc.srvs) {
+				optionalServices.push(btsc.srvs[srv].uuid);
+			}
+
+			navigator.bluetooth.requestDevice({
+				filters: [{ name: 'BT Smart Controller' }],
+				optionalServices: optionalServices
+			}).then(device => {
+				message("Device found. Connecting ...");
+				return device.gatt.connect();
+			}).then(server => {
+				message("Connected, analyzing ...");
+				btsc.server = server;
+				getNextRequest();
+			}).catch(error => {
+				message("Error: " + error);
+			});
+		}
+	</script>
+
+</body>
+
+</html>
