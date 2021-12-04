@@ -431,6 +431,7 @@ void displayString(char *text)
 
 	for(int i = 0; i < DIGITS; i++) {
 		DIGIT[i] = i < textSize ? ascii[text[i] - 0x20] : cSpace;
+		tempDigits[i] = DIGIT[i];
 	}
 }
 
