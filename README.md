@@ -1,6 +1,10 @@
-# fischertechnik-modules
+# ft-modules
 
-General-purpose modules for I2C, made for fischertechnik but not limited to it.
+General-purpose Arduino modules for I2C, made for fischertechnik but not necessarily limited to it. Also includes documents, spreadsheets, images, and more.
+
+See also [ft-modules-lib](https://github.com/leosdad/ft-modules-lib).
+
+## Modules
 
 ### I²C module
 
